@@ -1,0 +1,532 @@
+---
+title: "Analysis of Tamil psych verbs word order"
+author: "Sadhana"
+date: "2023-08-29"
+output: html_document
+---
+
+# Loading and updating the psych verbs dataset 
+#### 1. Loading the necessary libraries
+
+
+```{r libraries, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(broom)
+library(Hmisc)
+library(lme4)
+library (vcd)
+
+```
+
+#### 2. Loading the annotation file into R 
+
+```{r}
+
+tamil.psych.verb.df <- read.csv2(file.choose())
+
+```
+
+#### 3. Removing the unwanted columns
+
+```{r}
+
+tamil.psych.verb.df <- select(tamil.psych.verb.df, -c(Sentence, Case_of_subject_inTamil, Case_of_object_inTamil, Psych))
+
+```
+
+#### 4. Renaming the 'EO...ES' column
+
+```{r}
+
+tamil.psych.verb.df <- rename(tamil.psych.verb.df, EO_ES = EO...ES)
+
+```
+
+#### 5. Removing white spaces from the column values
+
+```{r}
+
+tamil.psych.verb.df <- mutate_if(tamil.psych.verb.df, is.character, str_trim)
+
+```
+ 
+#### 6. Updating the column values of 'Case_of_object' column
+ 
+```{r}
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object == 'accusative (phrasal)','accusative'))
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object == 'dative (phrasal)','dative'))
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object %in% c( 'dative participle noun clause', 'accusative participle noun clause'),'participle noun clause'))
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object %in% c("special verbal participle 'aai'","special verbal participle 'endru'", "special verbal participle 'aaga'", "special verbal participle 'patri'","special verbal participle 'ena'", "special negative verbal participle 'indri'","special negative verbal participle 'illaamal'"),'special verbal participle'))
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object == 'negative verbal participle clause','verbal participle clause'))
+
+
+```
+ 
+ 
+```{r}
+table (tamil.psych.verb.df$Case_of_object)
+```
+
+
+#### 7. Converting all the character columns as well as ID column into factors 
+
+```{r}
+
+tamil.psych.verb.df <- tamil.psych.verb.df %>% mutate_if(is.character, as.factor) %>% mutate_at(c('ID'), as.factor)
+
+```
+
+#### 8. Converting integer column values into logarithmic values by adding new columns
+
+```{r}
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, log_syllable_subject = log(Syllable_of_subject), log_syllable_object = log(Syllable_of_object))
+
+```
+
+
+#### 9. Checking the structure of the dataframe
+
+```{r}
+
+str(tamil.psych.verb.df)
+
+```
+
+```{r}
+
+summary (tamil.psych.verb.df)
+
+```
+
+
+#### 10. Checking the overall count of SOV and OSV word order
+
+```{r}
+
+table (tamil.psych.verb.df$Word_order)
+
+
+ggplot(tamil.psych.verb.df, aes(x = Word_order)) +
+  geom_bar(stat = "count", aes(fill = Word_order)) +
+  labs(x = "word order", y = "Frequency of word order")
+
+```
+
+#### 11. Checking the count of word order against all the categorical variables
+
+```{r}
+
+
+lapply(tamil.psych.verb.df[, c(2:3, 5:12, 15)],function(c){table(tamil.psych.verb.df$Word_order,c)})
+
+```
+
+
+#### 12. Checking the word order against the numerical variables i.e., syllabe of subject and object
+
+```{r}
+ 
+tamil.psych.verb.df %>% group_by(Word_order) %>% summarise(across(c(Syllable_of_subject, Syllable_of_object), mean))
+
+```
+
+#### 13. Displaying the count of word order against cases of object in bar chart
+
+```{r}
+
+
+ggplot(tamil.psych.verb.df, aes(x = Case_of_object)) +
+       geom_bar(stat = "count") +
+   facet_wrap(~Word_order) +
+  labs(x = "object cases", y = "count") +
+    theme(axis.text.x = element_text(angle = 90))
+     
+      
+
+```
+
+#### 14. Displaying the count of word order against the focus in bar chart
+
+```{r}
+
+ggplot(tamil.psych.verb.df, aes(x = Focus)) +
+       geom_bar(stat = "count") +
+   facet_wrap(~Word_order) +
+  labs(x = "Focus", y = "count") +
+    theme(axis.text.x = element_text(angle = 90))
+
+```
+
+#### 15. Changing the reference levels
+
+```{r}
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, EO_ES= relevel(EO_ES, ref= 'ES'))
+levels (tamil.psych.verb.df$EO_ES)
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, 
+                              Case_of_object = relevel(Case_of_object, ref= 'verbal participle clause'))
+levels (tamil.psych.verb.df$Case_of_object)
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, Focus = relevel(Focus, ref= 'object (emphasized)'))
+levels (tamil.psych.verb.df$Focus)
+
+```
+
+
+
+# Model 1: Generalized Linear Model (GLM)
+
+
+### Creating model 1
+
+```{r}
+
+tamil.psych.verb.glm <- glm(Word_order ~ EO_ES + Case_of_subject + Case_of_object + Animacy_of_subject + Animacy_of_object + Pronoun_subject + Pronoun_object + log_syllable_subject + log_syllable_object + Focus, family ="binomial", data = tamil.psych.verb.df)
+ 
+tamil.psych.verb.glm1 <- glm(Word_order ~ EO_ES + Case_of_subject + Case_of_object + log_syllable_subject + log_syllable_object + Focus, family ="binomial", data = tamil.psych.verb.df)
+
+
+
+```
+
+
+
+```{r}
+
+anova(tamil.psych.verb.glm1, tamil.psych.verb.glm, test = "Chisq")
+
+```
+
+
+
+```{r}
+
+summary(tamil.psych.verb.glm1)
+
+```
+
+Calculating the probabilities for SOV.
+
+```{r}
+
+intercept <- tidy(tamil.psych.verb.glm1)$estimate[1]
+print ("Probability of SOV order with reference levels")
+plogis(intercept)
+
+
+```
+
+Calculating the probabilities for OSV. 
+
+```{r}
+
+print ("Probability of OSV order with reference levels")
+1-plogis(intercept)
+
+```
+
+
+
+### Plotting the predictions of model 1 using ggplot
+
+```{r}
+
+tamil.psych.verb.df <- mutate(tamil.psych.verb.df, Word_order1 = ifelse(Word_order =='SOV', 1, 0))
+
+tamil.psych.verb.df$pred_model1 <- predict(tamil.psych.verb.glm1, type = "response")
+
+
+ggplot(tamil.psych.verb.df, aes(x = ID, y = Word_order1, group = 1)) + 
+  geom_jitter(width = 1, height = 0.02, color = "brown", show.legend = FALSE) +
+  geom_smooth(aes(y = pred_model1)) +
+  labs(x = "no. of data", y = "actual vs predict probability")
+
+
+```
+
+
+
+### Evaluation of model 1
+
+```{r}
+
+options(scipen = 999)
+somers2(tamil.psych.verb.df$pred_model1, tamil.psych.verb.df$Word_order1)
+
+
+```
+
+
+# Model 2: Generalized Linear Mixed Model (GLMM)
+
+
+#### Checking data count for each verb against the word order
+
+```{r}
+
+tamil.psych.verb.df %>% group_by(Verb ,Word_order) %>% summarise(Count = n()) %>% arrange(desc(Count))
+
+```
+
+### Creating model 2:
+
+
+
+```{r}
+
+tamil.psych.verb.glmm <- glmer(Word_order ~ EO_ES + Case_of_subject + Case_of_object + log_syllable_subject + log_syllable_object  + Focus + (1 | Verb), family ="binomial", data = tamil.psych.verb.df, nAGQ =0)
+
+```
+
+
+
+```{r}
+
+summary(tamil.psych.verb.glmm)
+
+```
+
+Calculate the probabilities for SOV
+
+```{r}
+
+print ("Probability of SOV order with reference levels")
+plogis(6.2379)
+
+
+```
+
+Calculate the probabilities for OSV
+
+```{r}
+
+print ("Probability of OSV order with reference levels")
+1-plogis(6.2379)
+
+
+```
+
+
+
+### Plotting the predictions of model 2 using ggplot
+
+```{r}
+
+tamil.psych.verb.df$pred_model2 <- predict(tamil.psych.verb.glmm, type = "response")
+
+
+ggplot(tamil.psych.verb.df, aes(x = ID, y = Word_order1, group = 1)) + 
+  geom_jitter(width = 1, height = 0.02, color = "brown", show.legend = FALSE) +
+  geom_smooth(aes(y=pred_model2)) +
+  labs(x = "no. of data", y = "actual vs predict probability")
+
+
+```
+
+
+### Evaluation of model 2
+
+```{r}
+
+print ("C value with random effect")
+somers2(tamil.psych.verb.df$pred_model2, tamil.psych.verb.df$Word_order1)
+
+
+```
+
+
+
+# Loading and updating the non-psych verbs dataset
+
+#### 1. Loading the annotation file into R 
+
+```{r}
+
+tamil.non.psych.verb.df <- read.csv2(file.choose())
+
+```
+
+#### 2. Removing the unwanted columns
+
+```{r}
+
+tamil.non.psych.verb.df <- select(tamil.non.psych.verb.df, -c(Sentence, Case_of_subject_inTamil, Case_of_object_inTamil, Psych))
+
+```
+
+
+#### 3. Removing white spaces from the column values
+
+```{r}
+
+tamil.non.psych.verb.df <- mutate_if(tamil.non.psych.verb.df, is.character, str_trim)
+
+```
+ 
+
+#### 4. Updating the column values of 'Case_of_object' column
+
+ 
+```{r}
+
+tamil.non.psych.verb.df <- mutate(tamil.non.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object == 'accusative (phrasal)','accusative'))
+
+tamil.non.psych.verb.df <- mutate(tamil.non.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object == 'locative (phrasal)','locative'))
+
+tamil.non.psych.verb.df <- mutate(tamil.non.psych.verb.df, Case_of_object = replace(Case_of_object, Case_of_object %in% c("special verbal participle 'endru'", "special verbal participle 'aaga'", "special verbal participle 'patri'","special verbal participle 'ena'"),'special verbal participle'))
+
+
+```
+ 
+ 
+```{r}
+
+table (tamil.non.psych.verb.df$Case_of_object)
+
+```
+
+
+#### 5. Converting all the character columns as well as ID column into factors 
+
+```{r}
+
+tamil.non.psych.verb.df <- tamil.non.psych.verb.df %>% mutate_if(is.character, as.factor) %>% mutate_at(c('ID'), as.factor)
+
+```
+
+#### 6. Converting integer column values into logarithmic values by adding new columns
+
+```{r}
+
+tamil.non.psych.verb.df <- mutate(tamil.non.psych.verb.df, log_syllable_subject = log(Syllable_of_subject), log_syllable_object = log(Syllable_of_object))
+
+```
+
+
+#### 7. Checking the structure of the dataframe
+
+```{r}
+
+str(tamil.non.psych.verb.df)
+
+```
+
+```{r}
+
+summary (tamil.non.psych.verb.df)
+
+```
+
+#### 8. Checking the no. of data for SOV and OSV order
+
+```{r}
+
+table (tamil.non.psych.verb.df$Word_order)
+
+```
+
+#### 9. Displaying the word order frequency in bar chart
+
+```{r}
+
+ggplot(tamil.non.psych.verb.df, aes(x = Word_order)) +
+  geom_bar(stat = "count", aes(fill = Word_order)) +
+  labs(x = "word order", y = "Frequency of word order")
+
+```
+
+
+#### 10. Checking the word order against the syllabe of subject and object
+
+```{r}
+ 
+tamil.non.psych.verb.df %>% group_by(Word_order) %>% summarise(across(c(Syllable_of_subject, Syllable_of_object), mean))
+
+```
+
+#### 11. Displaying the count of word order against the focus in bar chart
+
+```{r}
+
+ggplot(tamil.non.psych.verb.df, aes(x = Focus)) +
+       geom_bar(stat = "count") +
+   facet_wrap(~Word_order) +
+  labs(x = "Focus", y = "count") +
+    theme(axis.text.x = element_text(angle = 90))
+
+```
+
+
+# Model 3: GLMM for non-psych verbs
+
+ 
+### Creating model 3
+
+
+```{r}
+
+tamil.non.psych.verb.glmm <- glmer(Word_order ~ Case_of_subject + Case_of_object + log_syllable_subject + log_syllable_object + Focus + (1 | Verb), family ="binomial", data = tamil.non.psych.verb.df, nAGQ = 0)
+
+```
+
+
+
+```{r}
+
+summary (tamil.non.psych.verb.glmm)
+
+```
+
+Calculating the probabilities of SOV and OSV for non-psych verbs
+
+```{r}
+
+print ("Probability of SOV order with reference levels")
+plogis(5.4100)
+
+print ("Probability of OSV order with reference levels")
+1-plogis(5.4100)
+
+```
+
+
+
+### Plotting the predictions of model 3 using ggplot
+
+```{r}
+
+tamil.non.psych.verb.df <- mutate(tamil.non.psych.verb.df, Word_order1 = ifelse(Word_order =='SOV', 1, 0))
+
+tamil.non.psych.verb.df$pred <- predict(tamil.non.psych.verb.glmm, type = "response")
+
+
+ggplot(tamil.non.psych.verb.df, aes(x = ID, y = Word_order1, group = 1)) + 
+  geom_jitter(width = 1, height = 0.02, color = "brown", show.legend = FALSE) +
+  geom_smooth(aes(y=pred)) +
+  labs(x = "no. of data", y = "actual vs predict probability")
+
+```
+
+Model 3 shows that average probability of SOV is above 60% !
+
+### Evaluation of model 3
+
+```{r}
+
+print ("C value with random effect")
+somers2(tamil.non.psych.verb.df$pred, tamil.non.psych.verb.df$Word_order1)
+
+
+```
+
+ 
+
+
